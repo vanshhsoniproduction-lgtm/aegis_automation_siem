@@ -1,0 +1,6 @@
+{
+  "name": "Aegis Autonomous SIEM",
+  "description": "A self-driving SIEM and SOAR pipeline with autonomous decision-making visibility and detailed interaction logging.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
