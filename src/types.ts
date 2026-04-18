@@ -64,6 +64,8 @@ export interface Detection {
 export interface AIReport {
   summary: string;
   attack_type: string;
+  mitre_id: string;
+  remediation_code: string;
   risk: 'LOW' | 'MEDIUM' | 'HIGH';
   explanation: string;
   recommended_action: string;
