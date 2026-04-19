@@ -130,7 +130,7 @@ db.serialize(() => {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT || 3000;
   app.use(express.json());
 
   // In-memory log store and scan buffer

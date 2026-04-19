@@ -6,8 +6,12 @@ import socket
 import sys
 from datetime import datetime
 
-DJANGO_URL = "http://127.0.0.1:3000/api/agent/logs"
-SOAR_URL = "http://127.0.0.1:3000/api/firewall/active"
+# dynamic URL from command line or default localhost
+BASE_URL = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:3000"
+if BASE_URL.endswith('/'): BASE_URL = BASE_URL[:-1]
+
+DJANGO_URL = f"{BASE_URL}/api/agent/logs"
+SOAR_URL = f"{BASE_URL}/api/firewall/active"
 
 USERS = ["root", "admin", "vansh"]
 IPS = ["192.168.1.5", "45.67.89.10", "185.23.44.12"]

@@ -9,8 +9,12 @@ import os
 import sys
 import fcntl
 
-DJANGO_URL = "http://127.0.0.1:3000/api/agent/logs"
-SOAR_URL = "http://127.0.0.1:3000/api/firewall/active"
+# dynamic URL from command line or default localhost
+BASE_URL = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:3000"
+if BASE_URL.endswith('/'): BASE_URL = BASE_URL[:-1]
+
+DJANGO_URL = f"{BASE_URL}/api/agent/logs"
+SOAR_URL = f"{BASE_URL}/api/firewall/active"
 
 def get_device_id():
     return f"{socket.gethostname()}-{uuid.getnode()}"
