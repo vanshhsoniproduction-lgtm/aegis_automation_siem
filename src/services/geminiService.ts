@@ -3,8 +3,11 @@ import { loggingService } from "./loggingService";
 import { LogType, SecurityGraph, Detection, AIReport } from "../types";
 
 // Prefer env variable if exists, otherwise use the provided API key
-const API_KEY = (import.meta as any).env?.VITE_GEMINI_API_KEY || "AIzaSyDA7Rd77IFym7SYuxP0R5jCKGoGd7WbHGg";
-const ai = new GoogleGenAI({ apiKey: API_KEY });
+// Initializing outside to avoid recreating client unnecessary, but we'll check validity
+const getAIClient = () => {
+  const key = (import.meta as any).env?.VITE_GEMINI_API_KEY || "";
+  return new GoogleGenAI({ apiKey: key });
+};
 
 export class GeminiService {
   /**
@@ -21,8 +24,8 @@ export class GeminiService {
     });
 
     try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
+      const response = await getAIClient().models.generateContent({
+        model: "gemini-2.5-flash",
         contents: `Analyze these security detections and the behavioral graph to provide a human-readable summary.
         
         DETECTIONS: ${JSON.stringify(detections)}
@@ -114,5 +117,28 @@ export class GeminiService {
     }
 
     return logs;
+  }
+
+  /**
+   * Chat with Aegis (Overview Page)
+   */
+  static async chatWithAegis(message: string, contextData: any): Promise<string> {
+    try {
+      const response = await getAIClient().models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: `You are Aegis, the AI assistant for the Aegis Autonomous SIEM platform.
+        You MUST strictly answer only questions related to the SIEM project, cybersecurity, and the provided background context/data.
+        If the user asks an unrelated question (e.g. general knowledge, coding unrelated to this, math, history), you MUST politely refuse to answer and remind them of your purpose.
+
+        SYSTEM CONTEXT DATA:
+        ${JSON.stringify(contextData)}
+
+        USER MESSAGE: ${message}`
+      });
+      return response.text || "No response generated.";
+    } catch (e: any) {
+      console.error(e);
+      return `Error reaching Aegis AI: ${e?.message || e}`;
+    }
   }
 }

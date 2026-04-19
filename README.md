@@ -4,21 +4,20 @@ Aegis Autonomous SIEM is a next-generation security operations platform featurin
 
 ## 🌟 Key Features
 
-### 1. Neural Analysis Pipeline (Phases 1-6)
+### 1. Neural Analysis Pipeline (Phases 1-7)
 * **Phase 1: Ingestion Layer** — Centralized log collection from native OS endpoints.
 * **Phase 2: Normalization** — Standardizing heterogeneous schemas across various environments.
 * **Phase 3: Graph Engine** — Building behavioral node-edge models mapping entities over time.
-* **Phase 4: Detection Engine** — Advanced heuristic correlation detecting IP-based brute forces, lateral movement, data exfiltration, and critical process hijacking.
-* **Phase 5: Neural AI Reasoning** — Employs Gemini Flash (or dynamic backend models) to synthesize context, establish confidence mappings, and attribute the MITRE ATT&CK framework IDs.
-* **Phase 6: Autonomous SOAR** — Zero-latency playbook execution to actively **Block IPs**, **Isolate Hosts**, and **Kill Attacker Processes**.
+* **Phase 4: Detection Engine** — Advanced heuristic correlation detecting IP-based brute forces, lateral movement, etc.
+* **Phase 5: Intelligence Enrichment** — Secure backend proxying to **AbuseIPDB** and **VirusTotal** ensures real-time IP reputation and file/URL/IP hash validation without CORS limitations.
+* **Phase 6: Multi-Stage AI Validation** — Translates the context using **Gemini** and passes findings into **Groq (Llama-3)** for high-precision confirmation before taking action.
+* **Phase 7: Autonomous SOAR** — Zero-latency playbook execution to actively **Block IPs**, **Isolate Hosts**, and **Kill Attacker Processes**.
 
-### 2. Live Agent Telemetry
-The core SIEM includes native Python scripts to run securely on endpoint machines (macOS currently supported out of the box), pushing real traffic logs into the SIEM's ingestion buffers.
-
-* **Hybrid Mac Security Agent (`mac_agent.py`)**
-Hooks directly into macOS native `log stream` and process registries (`ps aux`) to filter high-severity system events (SSH outbound, curl data theft, etc) and broadcast them securely.
-* **Attack Simulator (`attack_sim.py`)** 
-A localized penetration testing script that automatically fires sequence attacks (Brute Force → Root Shell → DB Exfiltration) to test SOAR playbooks iteratively.
+### 2. Live Agent Telemetry & SOC Intelligence
+* **Overview AI Assistant** — A dedicated page where users can chat with **Aegis AI** (Gemini) about the system state, live detections, and audit logs.
+* **Manual Intelligence Lookup** — Global header integrated IP Reputation tool powered by the backend AbuseIPDB proxy.
+* **Hybrid Mac Security Agent (`mac_agent.py`)** — Hooks directly into macOS native `log stream` and process registries (`ps aux`) to filter high-severity system events.
+* **Attack Simulator (`attack_sim.py`)** — A localized penetration testing script that automatically fires sequence attacks (Brute Force → Root Shell → DB Exfiltration) to test SOAR playbooks iteratively.
 
 ### 3. Fully Persistent Database Architecture
 Powered securely by **SQLite3**, maintaining absolute persistence over:
@@ -33,6 +32,11 @@ Powered securely by **SQLite3**, maintaining absolute persistence over:
 ### Prerequisites
 - [Node.js](https://nodejs.org/en) (v18+)
 - Python 3+ (Pre-installed with standard libraries, no PIP required)
+- Configure a `.env` file at the project root requiring:
+  - `VITE_GEMINI_API_KEY` — Primary AI reasoning and Chat Assistant.
+  - `VITE_ABUSEIPDB_API_KEY` — IP reputation services.
+  - `VITE_VIRUSTOTAL_API_KEY` — Global file/URL intelligence.
+  - `VITE_GROQ_API_KEY` — Final stage AI validation.
 
 ### Execution 
 
@@ -45,7 +49,7 @@ npm install
 npm run dev
 ```
 
-> **Note:** The backend operates on `localhost:3000` executing SQLite alongside the bleeding-edge React + Vite frontend.
+> **Note:** The backend operates on `http://localhost:3000`. The server now includes a **Secure Proxy Layer** to prevent API keys from leaking to the browser and to bypass CORS restrictions for security APIs.
 
 **2. Attach Live Telemetry Agents:**
 Open a new background terminal to engage the live Mac endpoint telemetry. Ensure you have the Aegis directory open.
@@ -64,11 +68,11 @@ python3 attack_sim.py
 ---
 
 ## 🖥️ Platform Navigation
-1. **Dashboard:** Central security posture metrics and Neural Pipeline executor. Click `SCAN` to ingest buffers dynamically.
-2. **Firewall:** Read-only & interactable global host isolation maps (Blocking/Unblocking IPs).
-3. **History (Scan Results):** In-depth, node-level drill-downs to investigate past threats securely stored in the SQL Audit tables.
-4. **Logs (Live Stream):** See all incoming system-events or Agent OS Logs flowing into the system buffers live before processing. Features one-click database log flushing.
-5. **Settings:** Profile mapping and identity access views.
+1. **Dashboard:** Central metrics, Terminal Pipeline, and interactive Relationship Graphs.
+2. **Overview:** **Aegis AI Chat** — Chat with the platform about your live security data.
+3. **Firewall:** Management of active host isolation and blocked IP lists.
+4. **History:** Historical scan results and interactive timeline audit drill-downs.
+5. **Logs:** Real-time stream of raw and normalized system events.
 
 ## 🛠 Tech Stack 
 **Frontend**: React.js 19, TypeScript, TailwindCSS v4, Framer Motion, Vite  

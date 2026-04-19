@@ -10,6 +10,9 @@ import {
 } from '../types';
 import { loggingService } from './loggingService';
 import { GeminiService } from './geminiService';
+import { AbuseIpdbService } from './abuseIpdbService';
+import { VirusTotalService } from './virustotalService';
+import { GroqService } from './groqService';
 
 export class PipelineService {
   private static validateIP(ip: string): string {
@@ -118,8 +121,24 @@ export class PipelineService {
   }
 
   // Phase 4: Detection Engine
-  static detect(graph: SecurityGraph, logs: NormalizedLog[], threshold: number = 3): Detection[] {
+  static async detect(graph: SecurityGraph, logs: NormalizedLog[], threshold: number = 3): Promise<Detection[]> {
     const detections: Detection[] = [];
+
+    // 0. AbuseIPDB Checks for all unique IPs
+    const uniqueIps = new Set<string>();
+    logs.forEach(log => uniqueIps.add(log.source_ip));
+    
+    for (const ip of uniqueIps) {
+      const score = await AbuseIpdbService.checkIP(ip);
+      if (score > 75) {
+        detections.push({
+          type: "abuse_ipdb_malicious",
+          confidence: score / 100, // Convert score 0-100 to 0.0-1.0 confidence
+          evidence: logs.filter(l => l.source_ip === ip),
+          entities: [ip]
+        });
+      }
+    }
 
     // 1. IP-Based Brute Force & Password Spraying
     const ipAttempts = new Map<string, NormalizedLog[]>();
@@ -210,21 +229,31 @@ export class PipelineService {
     return detections;
   }
 
-  // Phase 5: AI Explanation
+  // Phase 5: AI Explanation (Enhanced with VT & Groq 2-Step)
   static async explain(detections: Detection[], graph: SecurityGraph): Promise<AIReport> {
     if (detections.length === 0) {
       return {
         summary: "No threats detected.",
         attack_type: "NONE",
+        mitre_id: "NONE",
+        remediation_code: "",
         risk: "LOW",
         explanation: "The system analyzed the logs and found no suspicious patterns matching known attack signatures.",
         recommended_action: "Continue monitoring."
       };
     }
 
-    const report = await GeminiService.explainDetections(detections, graph);
-    loggingService.log(LogType.EXPLANATION, "Pipeline", report);
-    return report;
+    // Step 1: Baseline Context Assessment (Gemini)
+    const geminiReport = await GeminiService.explainDetections(detections, graph);
+    
+    // Step 2: Hard Intel Gathering (VirusTotal)
+    const vtResults = await VirusTotalService.analyzeDetections(detections);
+
+    // Step 3: Two-Step Validation (Groq llama3-70b-8192)
+    const finalReport = await GroqService.validateWithGroq(geminiReport, vtResults, detections);
+    
+    // NOTE: Log entry is already pushed by GroqService upon completing validation.
+    return finalReport;
   }
 
   // Phase 6: SOAR Engine
@@ -268,7 +297,7 @@ export class PipelineService {
       }
 
       // RULE 5: High-Risk Signatures -> Immediate Block & Isolate
-      if (['malware', 'exploit', 'exfiltration', 'system_compromise', 'honeypot_trigger'].includes(det.type)) {
+      if (['malware', 'exploit', 'exfiltration', 'system_compromise', 'honeypot_trigger', 'abuse_ipdb_malicious'].includes(det.type)) {
         const ip = det.entities.find(e => e.includes('.'));
         if (ip) {
           const action: SOARAction = {
@@ -323,7 +352,7 @@ export class PipelineService {
       const raw = this.ingest(logs);
       const normalized = this.normalize(raw);
       const graph = this.buildGraph(normalized);
-      const detections = this.detect(graph, normalized, threshold);
+      const detections = await this.detect(graph, normalized, threshold);
       const aiReport = await this.explain(detections, graph);
       const soarActions = await this.executeSOAR(detections);
 

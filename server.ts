@@ -4,6 +4,10 @@ import path from 'path';
 import sqlite3 from 'sqlite3';
 import { fileURLToPath } from 'url';
 import { spawn, ChildProcess } from 'child_process';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
 import { LogType, SIEMLog } from './src/types.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -382,6 +386,65 @@ async function startServer() {
 
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', logCount: logs.length });
+  });
+
+  // ─── Proxy Endpoints (Solving CORS & Securing Keys) ───
+  
+  // AbuseIPDB Proxy
+  app.get('/api/proxy/abuseipdb/:ip', async (req, res) => {
+    const { ip } = req.params;
+    const apiKey = process.env.VITE_ABUSEIPDB_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'AbuseIPDB key missing on server' });
+
+    try {
+      const response = await fetch(`https://api.abuseipdb.com/api/v2/check?ipAddress=${ip}&maxAgeInDays=90`, {
+        headers: { 'Accept': 'application/json', 'Key': apiKey }
+      });
+      const data = await response.json();
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // VirusTotal Proxy
+  app.get('/api/proxy/virustotal/:type/:target', async (req, res) => {
+    const { type, target } = req.params;
+    const apiKey = process.env.VITE_VIRUSTOTAL_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'VirusTotal key missing on server' });
+
+    try {
+      // type can be 'ip_addresses', 'files', 'urls'
+      const url = `https://www.virustotal.com/api/v3/${type}/${target}`;
+      const response = await fetch(url, {
+        headers: { 'x-apikey': apiKey }
+      });
+      const data = await response.json();
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Groq Proxy
+  app.post('/api/proxy/groq', async (req, res) => {
+    const apiKey = process.env.VITE_GROQ_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'Groq key missing on server' });
+
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(req.body)
+      });
+      const data = await response.json();
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // Honeypot Trap

@@ -5,7 +5,7 @@ import {
   Ban, Plus, Search, Filter, X, User, Zap, AlertTriangle,
   CheckCircle, XCircle, Eye, Cpu, Network, Radar,
   BarChart3, TrendingUp, Lock, Unlock, FileText, Play, StopCircle,
-  Settings, LayoutDashboard, History, ChevronDown
+  Settings, LayoutDashboard, History, ChevronDown, MessageSquare
 } from 'lucide-react';
 import { PipelineResult, SOARAction, SIEMLog, LogType } from './types';
 import { GeminiService } from './services/geminiService';
@@ -13,8 +13,9 @@ import { PipelineService } from './services/pipelineService';
 import { SOARService } from './services/soarService';
 import { SecurityGraphView } from './components/SecurityGraph';
 import { loggingService } from './services/loggingService';
+import { AbuseIpdbService } from './services/abuseIpdbService';
 
-type Page = 'dashboard' | 'firewall' | 'history' | 'logs' | 'settings';
+type Page = 'dashboard' | 'overview' | 'firewall' | 'history' | 'logs' | 'settings';
 
 // ─── Terminal Pipeline Component ───
 const PipelineTerminal: React.FC<{ lines: string[]; isRunning: boolean }> = ({ lines, isRunning }) => {
@@ -104,6 +105,54 @@ export default function App() {
   const [historyTab, setHistoryTab] = useState<'timeline' | 'scans'>('timeline');
   const [expandedScan, setExpandedScan] = useState<string | null>(null);
   const [autoBlock, setAutoBlock] = useState(false);
+  const [selectedPattern, setSelectedPattern] = useState<string | null>(null);
+
+  const [searchIp, setSearchIp] = useState('');
+  const [isSearchingIp, setIsSearchingIp] = useState(false);
+
+  const handleSearchIp = async () => {
+    if (!searchIp.trim()) return;
+    setIsSearchingIp(true);
+    // Remove port numbers from IP if accidentally pasted
+    const cleanIp = searchIp.trim().split(':')[0];
+    const score = await AbuseIpdbService.checkIP(cleanIp);
+    setIsSearchingIp(false);
+    alert(`AbuseIPDB Threat Score for ${cleanIp}:\n${score > 0 ? score + '% (Malicious confidence)' : 'Clean (0%)'}`);
+    setSearchIp('');
+  };
+
+  const [chatMessages, setChatMessages] = useState<{role: 'user' | 'aegis', content: string}[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isChatLoading, setIsChatLoading] = useState(false);
+
+  const handleChat = async () => {
+    if (!chatInput.trim()) return;
+    const msg = chatInput.trim();
+    setChatMessages(prev => [...prev, { role: 'user', content: msg }]);
+    setChatInput('');
+    setIsChatLoading(true);
+    
+    const context = {
+      totalEvents: stats.totalEvents,
+      activeBlocks: stats.activeBlocks,
+      blockedIPs: blockedIPs,
+      recentDetections: result?.detections || [],
+      patterns: patterns
+    };
+
+    const reply = await GeminiService.chatWithAegis(msg, context);
+    setChatMessages(prev => [...prev, { role: 'aegis', content: reply }]);
+    setIsChatLoading(false);
+  };
+
+  const matchPattern = (item: any, pattern: string | null) => {
+    if (!pattern) return false;
+    const text = ((item.reason || '') + ' ' + (item.proof || '')).toUpperCase();
+    const pUpper = pattern.toUpperCase();
+    if (text.includes(pUpper)) return true;
+    const keywords = pUpper.split(' ').filter(w => w.length > 3 || w === 'SQL');
+    return keywords.length > 0 && keywords.some(k => text.includes(k));
+  };
 
   const fetchAll = useCallback(async () => {
     const [p, pts, active, all, hist, prof, st, lg, scans, agentSt] = await Promise.all([
@@ -219,6 +268,8 @@ export default function App() {
           addTermLine(`[!] AUTO-BLOCK ENABLED: Executing block against ${act.target}`);
           newLogs.push(`[!] AUTO-BLOCK ENABLED: Executing block against ${act.target}`);
           await SOARService.blockIP(act.target, `Auto-blocked due to SOAR playbook for: ${act.reason}`);
+          await SOARService.confirmAction(act.id, 'approved');
+          act.status = 'approved';
           addTermLine(`[✓] Target ${act.target} successfully blocked at firewall.`);
           newLogs.push(`[✓] Target ${act.target} successfully blocked at firewall.`);
         }
@@ -302,6 +353,7 @@ export default function App() {
 
   const nav = [
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
+    { id: 'overview', label: 'Overview', icon: <MessageSquare size={18} /> },
     { id: 'firewall', label: 'Firewall', icon: <Shield size={18} />, badge: blockedIPs.length },
     { id: 'history', label: 'History', icon: <History size={18} /> },
     { id: 'logs', label: 'Logs', icon: <Terminal size={18} /> },
@@ -367,6 +419,24 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <div className="flex items-center bg-[#0A0A0C] border border-border/60 rounded-lg px-2 overflow-hidden focus-within:border-accent/60 transition-all mr-2">
+              <input 
+                type="text" 
+                placeholder="Check IP Reputation..." 
+                value={searchIp}
+                onChange={e => setSearchIp(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSearchIp()}
+                className="bg-transparent border-none text-[11px] w-40 px-1 py-1.5 outline-none font-mono"
+              />
+              <button 
+                onClick={handleSearchIp} 
+                disabled={isSearchingIp || !searchIp.trim()} 
+                className="text-text-muted hover:text-accent disabled:opacity-50 transition-colors"
+                title="Search AbuseIPDB"
+              >
+                <Search size={13} />
+              </button>
+            </div>
             <button onClick={() => setShowManualIngest(!showManualIngest)} className="flex items-center gap-2 px-3 py-1.5 border border-border/60 rounded-lg text-[11px] font-bold text-text-muted hover:border-accent hover:text-accent transition-all">
               <FileText size={13} /> Ingest
             </button>
@@ -380,6 +450,48 @@ export default function App() {
         <main className="flex-1 overflow-y-auto">
           <div className="max-w-[1400px] mx-auto p-6 md:p-8">
             <AnimatePresence mode="wait">
+              {/* ═══════════════ OVERVIEW ═══════════════ */}
+              {page === 'overview' && (
+                <motion.div key="overview" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-[calc(100vh-140px)] flex flex-col bg-panel border border-border/60 rounded-xl overflow-hidden shadow-2xl">
+                  <div className="px-6 py-5 border-b border-border/40 bg-[#111114]">
+                    <h2 className="text-sm font-bold flex items-center gap-2"><Cpu className="text-accent" size={16} /> Aegis AI Assistant</h2>
+                    <p className="text-[11px] text-text-muted mt-1">Ask questions strictly about your loaded threat intelligence, audit logs, and network state.</p>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-6 space-y-4 flex flex-col min-h-0 bg-bg">
+                    {chatMessages.length === 0 && (
+                      <div className="text-center text-text-muted text-xs mt-10 space-y-2">
+                        <MessageSquare size={32} className="mx-auto opacity-30 text-accent mb-4" />
+                        <div>Start a conversation with the Aegis AI Assistant.</div>
+                        <div className="italic text-[10px] text-text-muted/60">Try asking: "Summarize the recent detections." or "How many active blocks are there?"</div>
+                      </div>
+                    )}
+                    {chatMessages.map((msg, i) => (
+                      <div key={i} className={`max-w-[80%] rounded-xl px-5 py-4 text-[12px] whitespace-pre-wrap leading-relaxed shadow-sm ${msg.role === 'user' ? 'bg-panel border border-border/60 self-end text-text-main' : 'bg-accent/10 border border-accent/20 self-start text-accent-light'}`}>
+                        {msg.content}
+                      </div>
+                    ))}
+                    {isChatLoading && (
+                      <div className="self-start text-[10px] text-accent flex items-center gap-2 px-2 py-4">
+                        <div className="w-2 h-2 bg-accent rounded-full animate-bounce opacity-60" />
+                        Analyzing...
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-4 bg-bg border-t border-border/40 flex items-center gap-3 shrink-0">
+                    <input 
+                       value={chatInput} 
+                       onChange={e => setChatInput(e.target.value)} 
+                       onKeyDown={e => { if (e.key === 'Enter') handleChat(); }}
+                       placeholder="Ask about the SIEM data..." 
+                       className="flex-1 bg-[#0A0A0C] border border-border/60 rounded-xl px-5 py-3.5 text-[12px] focus:ring-1 focus:ring-accent outline-none shadow-inner"
+                    />
+                    <button onClick={handleChat} disabled={isChatLoading || !chatInput.trim()} className="p-3.5 bg-accent text-white rounded-xl hover:bg-accent-hover transition-colors disabled:opacity-50">
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+
               {/* ═══════════════ DASHBOARD ═══════════════ */}
               {page === 'dashboard' && (
                 <motion.div key="dash" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">
@@ -998,9 +1110,9 @@ export default function App() {
                     </div>
                     <div className="divide-y divide-border/20">
                       {patterns.map(p => (
-                        <div key={p.id} className="px-6 py-3 flex items-center justify-between hover:bg-white/[0.02] transition-all">
+                        <div key={p.id} onClick={() => setSelectedPattern(p.type)} className="px-6 py-3 flex items-center justify-between hover:bg-white/[0.05] cursor-pointer transition-all">
                           <div>
-                            <span className="text-xs font-bold">{p.type}</span>
+                            <span className="text-xs font-bold text-accent">{p.type}</span>
                             <p className="text-[10px] text-text-muted truncate max-w-[400px]">{p.description}</p>
                           </div>
                           <span className={`text-[9px] font-bold px-2 py-0.5 rounded ${
@@ -1010,6 +1122,36 @@ export default function App() {
                       ))}
                     </div>
                   </div>
+
+                  {/* Pattern Details Modal */}
+                  <AnimatePresence>
+                    {selectedPattern && (
+                      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="bg-bg border border-border/60 rounded-xl overflow-hidden w-full max-w-2xl shadow-2xl flex flex-col max-h-[80vh]">
+                          <div className="px-6 py-4 border-b border-border/30 flex items-center justify-between bg-panel">
+                            <h3 className="text-sm font-bold flex items-center gap-2"><Radar size={16} className="text-accent" /> {selectedPattern.replace(/_/g, ' ').toUpperCase()} BLOCKS</h3>
+                            <button onClick={() => setSelectedPattern(null)} className="text-text-muted hover:text-text-main"><X size={16} /></button>
+                          </div>
+                          <div className="p-6 overflow-y-auto space-y-3 flex-1">
+                            {auditHistory.filter(a => matchPattern(a, selectedPattern)).length === 0 ? (
+                              <div className="text-center text-text-muted/60 text-xs italic py-10">No blocks found for this pattern type yet.</div>
+                            ) : (
+                              auditHistory.filter(a => matchPattern(a, selectedPattern)).map((a, i) => (
+                                <div key={i} className="p-4 bg-panel border border-border/40 rounded-lg">
+                                  <div className="flex justify-between mb-2">
+                                    <span className="text-xs font-bold text-danger">{a.target}</span>
+                                    <span className="text-[10px] font-mono text-text-muted">{new Date(a.timestamp).toLocaleString()}</span>
+                                  </div>
+                                  <div className="text-[11px] text-text-muted mb-2">{a.reason}</div>
+                                  <div className="text-[9px] font-mono text-text-muted/60 truncate bg-bg border border-border/30 p-2 rounded">{a.proof}</div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </motion.div>
+                      </div>
+                    )}
+                  </AnimatePresence>
                 </motion.div>
               )}
             </AnimatePresence>
