@@ -45,16 +45,37 @@ export class PipelineService {
       const raw = entry.raw_log || {};
       
       // Fallback handlers for various log formats (Standard SIEM, custom attacker sim, risk_dataset format)
-      let logType = String(raw.event_type || raw.category || raw.type || "UNKNOWN").toUpperCase();
-      let actionTxt = String(raw.action || raw.action_taken || raw.pattern || "UNKNOWN").toUpperCase();
+      let logType = String(
+        raw.event_type || raw.category || raw.type || raw.eventSource || raw.source || raw.module || raw.facility || "UNKNOWN"
+      ).toUpperCase();
+
+      let actionTxt = String(
+        raw.action || raw.action_taken || raw.pattern || raw.eventName || raw.operation || raw.event_name || raw.signature || raw.request || "UNKNOWN"
+      ).toUpperCase();
       
+      let statusStr = String(
+        raw.status || raw.risk || raw.severity || raw.level || raw.result || raw.outcome || raw.priority || "UNKNOWN"
+      ).toUpperCase();
+
+      // Fallback for flat antivirus scan reports (e.g. "threats_found": 2)
+      if (raw.threats_found > 0 || (Array.isArray(raw.results) && raw.results.some((r:any) => r.threat || r.malware))) {
+        logType = "MALWARE_SCAN";
+        statusStr = "CRITICAL";
+        if (actionTxt === "UNKNOWN") actionTxt = "THREATS_DETECTED";
+      }
+
+      // Universal critical catch-all for any embedded boolean/tags that indicate a threat
+      if (raw.is_threat === true || raw.malicious === true || raw.blocked === true) {
+        statusStr = "CRITICAL";
+      }
+
       const log: NormalizedLog = {
-        timestamp: this.validateTimestamp(raw.timestamp || raw.time || raw.ts),
+        timestamp: this.validateTimestamp(raw.timestamp || raw.time || raw.start_time || raw.ts || raw.eventTime || raw.date || raw.created_at),
         event_type: logType,
-        user: String(raw.user || raw.username || "anonymous").toLowerCase(),
-        source_ip: this.validateIP(raw.source_ip || raw.ip || raw.src_ip || "0.0.0.0"),
+        user: String(raw.user || raw.username || raw.principal || raw.actor || raw.account || raw.usr || "anonymous").toLowerCase(),
+        source_ip: this.validateIP(raw.source_ip || raw.ip || raw.src_ip || raw.client_ip || raw.remote_ip || raw.src || raw.sourceIp || raw.host || "0.0.0.0"),
         action: actionTxt,
-        status: String(raw.status || raw.risk || raw.severity || "UNKNOWN").toUpperCase()
+        status: statusStr
       };
 
       // Strict Gate: No null values allowed
@@ -247,7 +268,7 @@ export class PipelineService {
       }
 
       // RULE 5: High-Risk Signatures -> Immediate Block & Isolate
-      if (['malware', 'exploit', 'exfiltration', 'system_compromise'].includes(det.type)) {
+      if (['malware', 'exploit', 'exfiltration', 'system_compromise', 'honeypot_trigger'].includes(det.type)) {
         const ip = det.entities.find(e => e.includes('.'));
         if (ip) {
           const action: SOARAction = {

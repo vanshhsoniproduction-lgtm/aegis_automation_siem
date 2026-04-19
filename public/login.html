@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Instagram</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display:flex; justify-content:center; align-items:center; height: 100vh; background: #fafafa; margin: 0; }
+    .box { background: white; border: 1px solid #dbdbdb; padding: 40px; text-align: center; width: 350px; }
+    input { display: block; width: calc(100% - 20px); margin: 5px auto; padding: 10px; border: 1px solid #dbdbdb; background: #fafafa; border-radius: 3px; }
+    button { background: #0095f6; color: white; border: none; padding: 8px; width: 100%; font-weight: bold; cursor: pointer; border-radius: 4px; margin-top: 15px; }
+    h1 { font-family: 'Times New Roman', Times, serif; font-size: 2.5rem; margin-bottom: 20px; font-style: italic; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>Instagram</h1>
+    <input type="text" placeholder="Phone number, username, or email">
+    <input type="password" placeholder="Password">
+    <button>Log In</button>
+  </div>
+  <script>
+    // Send a honeypot log to SIEM automatically when this page is visited
+    fetch('/api/agent/logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            logs: [{
+                event_type: "HONEYPOT_TRIGGER",
+                action: "Accessed Fake Login Page (/login.html)",
+                status: "CRITICAL",
+                source_ip: "127.0.0.1",
+                user: "unknown",
+                timestamp: new Date().toISOString()
+            }],
+            device_name: "Web-Honeypot",
+            device_id: "Honey-1"
+        })
+    }).catch(e => console.log(e));
+  </script>
+</body>
+</html>

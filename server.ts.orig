@@ -392,8 +392,7 @@ async function startServer() {
          // Block the page completely!
          return res.status(403).send('<h1>403 Forbidden</h1><p>Your IP has been blocked by Aegis SIEM actively.</p>');
       }
-      const distPath = path.join(process.cwd(), 'public');
-      res.sendFile(path.join(distPath, 'login.html'));
+      next();
     });
   });
   

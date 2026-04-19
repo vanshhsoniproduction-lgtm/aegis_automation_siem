@@ -103,6 +103,7 @@ export default function App() {
   const [scanHistory, setScanHistory] = useState<Array<{ id: string; timestamp: string; result: PipelineResult; terminalLog: string[] }>>([]);
   const [historyTab, setHistoryTab] = useState<'timeline' | 'scans'>('timeline');
   const [expandedScan, setExpandedScan] = useState<string | null>(null);
+  const [autoBlock, setAutoBlock] = useState(false);
 
   const fetchAll = useCallback(async () => {
     const [p, pts, active, all, hist, prof, st, lg, scans, agentSt] = await Promise.all([
@@ -205,9 +206,23 @@ export default function App() {
 
       addTermLine(`[→] Phase 6: SOAR — Generating automated response playbooks`);
       await sleep(300);
-      pipelineResult.soar_actions.forEach(act => {
+      
+      const newLogs = [...terminalLines];
+      newLogs.push(`[→] Phase 6: SOAR — Generating automated response playbooks`);
+
+      for (const act of pipelineResult.soar_actions) {
         addTermLine(`[◆] Action: ${act.action} → ${act.target} [${act.status}]`);
-      });
+        newLogs.push(`[◆] Action: ${act.action} → ${act.target} [${act.status}]`);
+        
+        // Auto-Block Magic ✨
+        if (autoBlock && act.action === 'BLOCK_IP' && act.target) {
+          addTermLine(`[!] AUTO-BLOCK ENABLED: Executing block against ${act.target}`);
+          newLogs.push(`[!] AUTO-BLOCK ENABLED: Executing block against ${act.target}`);
+          await SOARService.blockIP(act.target, `Auto-blocked due to SOAR playbook for: ${act.reason}`);
+          addTermLine(`[✓] Target ${act.target} successfully blocked at firewall.`);
+          newLogs.push(`[✓] Target ${act.target} successfully blocked at firewall.`);
+        }
+      }
 
       addTermLine(`[→] Phase 7: AUDIT — Writing results to persistent store`);
       await sleep(200);
@@ -218,7 +233,7 @@ export default function App() {
         id: `SCAN-${Date.now()}`,
         timestamp: new Date().toISOString(),
         result: pipelineResult,
-        terminalLog: [...terminalLines, `[✓] Pipeline complete — ${pipelineResult.detections.length} threats, ${pipelineResult.soar_actions.length} actions queued`]
+        terminalLog: [...newLogs, `[→] Phase 7: AUDIT — Writing results to persistent store`, `[✓] Pipeline complete — ${pipelineResult.detections.length} threats, ${pipelineResult.soar_actions.length} actions queued`]
       };
       
       await SOARService.saveScan(scanEntry);
@@ -231,7 +246,7 @@ export default function App() {
     isProcessingRef.current = false;
     setIsProcessing(false);
     fetchAll();
-  }, [threshold, fetchAll]);
+  }, [threshold, fetchAll, autoBlock]);
 
   useEffect(() => {
     runPipelineRef.current = runPipeline;
@@ -955,6 +970,21 @@ export default function App() {
                         <p className="text-[10px] text-text-muted mt-2 italic">Lower = more sensitive (more false positives). Higher = fewer alerts.</p>
                       </div>
                     </div>
+                  </div>
+
+                  {/* Auto-Block Toggle */}
+                  <div className="bg-panel border border-border/60 rounded-xl p-5 mb-6">
+                    <h3 className="text-sm font-bold mb-1 flex items-center gap-2">
+                       <Shield size={16} className={autoBlock ? "text-success" : "text-text-muted"} /> Autonomous Firewall Action
+                    </h3>
+                    <p className="text-[11px] text-text-muted mb-4">When enabled, the SOAR engine will automatically apply network isolation and IP blocks to any target designated as a CRITICAL threat without requiring human approval.</p>
+                    <button 
+                      onClick={() => setAutoBlock(!autoBlock)} 
+                      className={`px-6 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${autoBlock ? 'bg-success text-white' : 'bg-bg border border-border/60 text-text-muted'}`}
+                    >
+                      {autoBlock ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                      {autoBlock ? "Auto-Block Enabled" : "Auto-Block Disabled"}
+                    </button>
                   </div>
 
                   {/* Known Patterns */}

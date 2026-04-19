@@ -7,7 +7,7 @@ import sys
 from datetime import datetime
 
 DJANGO_URL = "http://127.0.0.1:3000/api/agent/logs"
-SOAR_URL = "http://127.0.0.1:3000/api/soar/pending"
+SOAR_URL = "http://127.0.0.1:3000/api/firewall/active"
 
 USERS = ["root", "admin", "vansh"]
 IPS = ["192.168.1.5", "45.67.89.10", "185.23.44.12"]
@@ -59,16 +59,15 @@ def check_soar_kill():
     try:
         req = urllib.request.Request(SOAR_URL, method='GET')
         with urllib.request.urlopen(req, timeout=1) as res:
-            actions = json.loads(res.read().decode())
-            for action in actions:
-                # Only care about recent blocks
-                if action.get("action") == "BLOCK_IP" or action.get("action") == "ISOLATE_SYSTEM":
-                    target = action.get("target")
-                    if target in IPS:
-                        # Ensure we don't trip on an old pending block randomly
-                        print(f"\n💀 [FATAL] SOAR ACTIVE RESPONSE TRIGGERED (Target: {target})! 💀")
-                        print("🛑 Threat Blocked! Exiting Simulator...\n")
-                        sys.exit(0)
+            blocks = json.loads(res.read().decode())
+            for block in blocks:
+                # Only care about actual active firewall blocks
+                target = block.get("ip")
+                if target and target in IPS:
+                    # Ensure we don't trip on an old pending block randomly
+                    print(f"\n💀 [FATAL] SOAR ACTIVE RESPONSE TRIGGERED (Target: {target})! 💀")
+                    print("🛑 Threat Blocked! Exiting Simulator...\n")
+                    sys.exit(0)
     except SystemExit:
         sys.exit(0)
     except:

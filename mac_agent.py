@@ -10,7 +10,7 @@ import sys
 import fcntl
 
 DJANGO_URL = "http://127.0.0.1:3000/api/agent/logs"
-SOAR_URL = "http://127.0.0.1:3000/api/soar/pending"
+SOAR_URL = "http://127.0.0.1:3000/api/firewall/active"
 
 def get_device_id():
     return f"{socket.gethostname()}-{uuid.getnode()}"
@@ -143,12 +143,11 @@ if __name__ == "__main__":
                 try:
                     req = urllib.request.Request(SOAR_URL, method='GET')
                     with urllib.request.urlopen(req, timeout=1) as res:
-                        actions = json.loads(res.read().decode())
-                        for action in actions:
-                            action_id = action.get("id")
-                            if action_id not in seen_actions and (action.get("action") == "ISOLATE_SYSTEM" or action.get("action") == "BLOCK_IP"):
-                                seen_actions.add(action_id)
-                                target = action.get("target")
+                        blocks = json.loads(res.read().decode())
+                        for block in blocks:
+                            target = block.get("ip")
+                            if target and target not in seen_actions:
+                                seen_actions.add(target)
                                 SAFE = ["127.0.0.1", "localhost"]
                                 if target not in SAFE:
                                     print(f"🔥 SOAR: Aegis SIEM triggered block for -> {target}")
