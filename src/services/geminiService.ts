@@ -2,7 +2,9 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { loggingService } from "./loggingService";
 import { LogType, SecurityGraph, Detection, AIReport } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Prefer env variable if exists, otherwise use the provided API key
+const API_KEY = (import.meta as any).env?.VITE_GEMINI_API_KEY || "AIzaSyDA7Rd77IFym7SYuxP0R5jCKGoGd7WbHGg";
+const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 export class GeminiService {
   /**
@@ -20,7 +22,7 @@ export class GeminiService {
 
     try {
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-3.1-pro-preview",
         contents: `Analyze these security detections and the behavioral graph to provide a human-readable summary.
         
         DETECTIONS: ${JSON.stringify(detections)}

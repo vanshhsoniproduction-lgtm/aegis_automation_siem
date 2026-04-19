@@ -3,6 +3,7 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import sqlite3 from 'sqlite3';
 import { fileURLToPath } from 'url';
+import { spawn, ChildProcess } from 'child_process';
 import { LogType, SIEMLog } from './src/types.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -131,6 +132,52 @@ async function startServer() {
   // In-memory log store and scan buffer
   let logs: SIEMLog[] = [];
   let rawBuffer: any[] = [];
+  
+  let agentProcess: ChildProcess | null = null;
+  let agentTerminalOutput: string[] = [];
+
+  // ─── Agent Control Routes ───
+  app.post('/api/agent/control', (req, res) => {
+    const { action } = req.body;
+    if (action === 'start') {
+      if (!agentProcess) {
+        agentTerminalOutput = ['[System] Booting virtual environment for Hybrid Mac Agent...'];
+        // Use the venv explicitly with -u (unbuffered) so output streams live to UI
+        agentProcess = spawn('venv/bin/python', ['-u', 'mac_agent.py'], { cwd: process.cwd() });
+        agentProcess.stdout?.on('data', (data) => {
+          const lines = data.toString().split('\n').filter(Boolean);
+          agentTerminalOutput.push(...lines);
+          if (agentTerminalOutput.length > 200) agentTerminalOutput = agentTerminalOutput.slice(-200);
+        });
+        agentProcess.stderr?.on('data', (data) => {
+          const lines = data.toString().split('\n').filter(Boolean);
+          agentTerminalOutput.push(...lines.map((l: string) => `[ERR] ${l}`));
+          if (agentTerminalOutput.length > 200) agentTerminalOutput = agentTerminalOutput.slice(-200);
+        });
+        agentProcess.on('close', () => {
+          agentTerminalOutput.push('[System] Agent process terminated automatically.');
+          agentProcess = null;
+        });
+        res.json({ success: true, message: 'Agent started' });
+      } else {
+        res.json({ success: false, message: 'Agent already running' });
+      }
+    } else if (action === 'stop') {
+      if (agentProcess) {
+        agentTerminalOutput.push('[System] Sending SIGINT to gracefully stop agent...');
+        agentProcess.kill('SIGINT');
+        // fallback kill
+        setTimeout(() => { if(agentProcess) agentProcess.kill('SIGKILL'); }, 1000);
+        res.json({ success: true, message: 'Agent stopping' });
+      } else {
+        res.json({ success: false, message: 'Agent not running' });
+      }
+    }
+  });
+
+  app.get('/api/agent/status', (req, res) => {
+    res.json({ isRunning: !!agentProcess, output: agentTerminalOutput });
+  });
 
   // ─── Log Routes ───
   app.get('/api/logs', (req, res) => res.json(logs));

@@ -7,6 +7,7 @@ import socket
 import uuid
 import os
 import sys
+import fcntl
 
 DJANGO_URL = "http://127.0.0.1:3000/api/agent/logs"
 SOAR_URL = "http://127.0.0.1:3000/api/soar/pending"
@@ -81,12 +82,18 @@ if __name__ == "__main__":
             stderr=subprocess.DEVNULL,
             text=True
         )
+        # Make stdout non-blocking
+        fd = process.stdout.fileno()
+        fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+        fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
     except:
         print("Required root or sudo privileges for log stream. Falling back to basic process monitoring.")
         process = None
 
     buffer = []
     last_scan = time.time()
+    last_heartbeat = time.time()
+    seen_actions = set()
 
     def send_buffer():
         global buffer
@@ -113,30 +120,38 @@ if __name__ == "__main__":
         while True:
             # Try to read line without blocking forever if no process
             if process:
-                line = process.stdout.readline()
-                if line:
-                    line = line.strip()
-                    if is_suspicious_log(line) and not is_duplicate(line):
-                        buffer.append({
-                            "pattern": line,
-                            "category": "OS_LOG",
-                            "risk": "MEDIUM",
-                            "ip": "127.0.0.1",
-                            "user": os.getlogin()
-                        })
+                try:
+                    line = process.stdout.readline()
+                    if line:
+                        line = line.strip()
+                        if is_suspicious_log(line) and not is_duplicate(line):
+                            buffer.append({
+                                "pattern": line,
+                                "category": "OS_LOG",
+                                "risk": "MEDIUM",
+                                "ip": "127.0.0.1",
+                                "user": os.getlogin()
+                            })
+                except TypeError:
+                    pass
+                except IOError:
+                    pass
 
-            if time.time() - last_scan > 2:
+            now = time.time()
+            if now - last_scan > 2:
                 # 🛡️ SOAR ACTIVE RESPONSE POLL
                 try:
                     req = urllib.request.Request(SOAR_URL, method='GET')
                     with urllib.request.urlopen(req, timeout=1) as res:
                         actions = json.loads(res.read().decode())
                         for action in actions:
-                            if action.get("action") == "ISOLATE_SYSTEM" or action.get("action") == "BLOCK_IP":
+                            action_id = action.get("id")
+                            if action_id not in seen_actions and (action.get("action") == "ISOLATE_SYSTEM" or action.get("action") == "BLOCK_IP"):
+                                seen_actions.add(action_id)
                                 target = action.get("target")
                                 SAFE = ["127.0.0.1", "localhost"]
-                                if target in SAFE: continue
-                                print(f"🔥 SOAR: Aegis SIEM triggered block for -> {target}")
+                                if target not in SAFE:
+                                    print(f"🔥 SOAR: Aegis SIEM triggered block for -> {target}")
                 except Exception as soar_e:
                     pass
 
@@ -150,8 +165,19 @@ if __name__ == "__main__":
                             "user": os.getlogin()
                         })
 
+                # Produce a heartbeat log every 10 seconds so UI shows it's alive
+                if now - last_heartbeat > 10:
+                    buffer.append({
+                        "pattern": "Agent heartbeat - System Nominal",
+                        "category": "SYSTEM",
+                        "risk": "LOW",
+                        "ip": "127.0.0.1",
+                        "user": os.getlogin()
+                    })
+                    last_heartbeat = now
+
                 send_buffer()
-                last_scan = time.time()
+                last_scan = now
 
             time.sleep(0.01)
     except KeyboardInterrupt:

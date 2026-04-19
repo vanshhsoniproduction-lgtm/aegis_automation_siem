@@ -86,6 +86,19 @@ export class SOARService {
     try { return (await fetch('/api/logs', { method: 'DELETE' })).ok; } catch { return false; }
   }
 
+  // ─── Agent System Control ───
+  static async startAgent(): Promise<boolean> {
+    try { return (await fetch('/api/agent/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'start' }) })).ok; } catch { return false; }
+  }
+
+  static async stopAgent(): Promise<boolean> {
+    try { return (await fetch('/api/agent/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'stop' }) })).ok; } catch { return false; }
+  }
+
+  static async getAgentStatus(): Promise<any> {
+    try { return await (await fetch('/api/agent/status')).json(); } catch { return { isRunning: false, output: [] }; }
+  }
+
   // ─── Scans ───
   static async getScans(): Promise<any[]> {
     try { return await (await fetch('/api/scans')).json(); } catch { return []; }

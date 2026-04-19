@@ -4,7 +4,7 @@ import {
   Shield, Activity, Terminal, Globe, Clock, ChevronRight,
   Ban, Plus, Search, Filter, X, User, Zap, AlertTriangle,
   CheckCircle, XCircle, Eye, Cpu, Network, Radar,
-  BarChart3, TrendingUp, Lock, Unlock, FileText, Play,
+  BarChart3, TrendingUp, Lock, Unlock, FileText, Play, StopCircle,
   Settings, LayoutDashboard, History, ChevronDown
 } from 'lucide-react';
 import { PipelineResult, SOARAction, SIEMLog, LogType } from './types';
@@ -77,6 +77,8 @@ export default function App() {
   const [page, setPage] = useState<Page>('dashboard');
   const [result, setResult] = useState<PipelineResult | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const isProcessingRef = useRef(false);
+  const [agentStatus, setAgentStatus] = useState({ isRunning: false, output: [] as string[] });
   const [terminalLines, setTerminalLines] = useState<string[]>(['[→] Aegis Neural Pipeline v2.1 initialized', '[OK] Awaiting ingestion command...']);
   const [pendingActions, setPendingActions] = useState<SOARAction[]>([]);
   const [blockedIPs, setBlockedIPs] = useState<any[]>([]);
@@ -103,28 +105,49 @@ export default function App() {
   const [expandedScan, setExpandedScan] = useState<string | null>(null);
 
   const fetchAll = useCallback(async () => {
-    const [p, pts, active, all, hist, prof, st, lg, scans] = await Promise.all([
+    const [p, pts, active, all, hist, prof, st, lg, scans, agentSt] = await Promise.all([
       SOARService.getPendingActions(), SOARService.getPatterns(),
       SOARService.getActiveBlocks(), SOARService.getBlockedIPs(),
       SOARService.getAuditLog(), SOARService.getProfile(),
       SOARService.getStats(), loggingService.getLogs(),
-      SOARService.getScans()
+      SOARService.getScans(), SOARService.getAgentStatus()
     ]);
     setPendingActions(p); setPatterns(pts);
     setBlockedIPs(active); setAllBlocked(all);
     setAuditHistory(hist); setStats(st);
     setLogs(lg.reverse());
     setScanHistory(scans);
+    setAgentStatus(agentSt || { isRunning: false, output: [] });
     if (prof?.username) {
       setProfile(prof);
     }
   }, []);
 
-  useEffect(() => { fetchAll(); const i = setInterval(fetchAll, 5000); return () => clearInterval(i); }, [fetchAll]);
+  const runPipelineRef = useRef<any>(null);
+
+  useEffect(() => {
+    fetchAll();
+    const tick = async () => {
+      await fetchAll();
+      if (!isProcessingRef.current) {
+        const buffered = await SOARService.getBufferedAgentLogs();
+        if (buffered && buffered.length > 0 && runPipelineRef.current) {
+          await SOARService.clearBufferedAgentLogs();
+          runPipelineRef.current(buffered);
+        }
+      }
+    };
+    const i = setInterval(tick, 1500);
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+    return () => clearInterval(i);
+  }, [fetchAll]);
 
   const addTermLine = (line: string) => setTerminalLines(prev => [...prev, line]);
 
   const runPipeline = useCallback(async (customLogs?: any[]) => {
+    isProcessingRef.current = true;
     setIsProcessing(true);
     setTerminalLines(['[→] Aegis Neural Pipeline v2.1 — Scan Initiated']);
 
@@ -168,6 +191,13 @@ export default function App() {
       addTermLine(`[OK] Graph: ${pipelineResult.graph.nodes.length} nodes, ${pipelineResult.graph.edges.length} edges`);
       addTermLine(`[OK] Detections: ${pipelineResult.detections.length} threat(s) identified`);
 
+      if (pipelineResult.detections.length > 0 && "Notification" in window && Notification.permission === "granted") {
+        const topThreat = pipelineResult.detections[0];
+        new Notification("⚠️ Aegis: Threat Detected!", {
+          body: `Detected ${pipelineResult.detections.length} threat(s). Top threat: ${topThreat.type.toUpperCase()} (${Math.round(topThreat.confidence * 100)}% confidence).`,
+        });
+      }
+
       pipelineResult.detections.forEach(det => {
         addTermLine(`[!] THREAT: ${det.type.toUpperCase()} — ${Math.round(det.confidence * 100)}% confidence`);
         addTermLine(`    Entities: ${det.entities.join(', ')}`);
@@ -198,9 +228,14 @@ export default function App() {
       addTermLine(`[!] PIPELINE FAILURE: ${err}`);
     }
 
+    isProcessingRef.current = false;
     setIsProcessing(false);
     fetchAll();
   }, [threshold, fetchAll]);
+
+  useEffect(() => {
+    runPipelineRef.current = runPipeline;
+  }, [runPipeline]);
 
   const handleConfirm = async (id: string, status: 'approved' | 'rejected') => {
     if (await SOARService.confirmAction(id, status)) fetchAll();
@@ -789,6 +824,37 @@ export default function App() {
               {/* ═══════════════ LOGS ═══════════════ */}
               {page === 'logs' && (
                 <motion.div key="logs" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
+                  
+                  {/* Virtual Terminal & Agent Control */}
+                  <div className="bg-panel border border-border/60 rounded-xl p-5 mb-4 shadow-xl">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <Terminal size={18} className="text-accent" />
+                        <h3 className="text-sm font-bold">Virtual Environment Interface</h3>
+                        {agentStatus?.isRunning && <span className="text-[10px] font-bold text-success bg-success/10 px-2 py-0.5 rounded border border-success/30 animate-pulse">Running</span>}
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={() => SOARService.startAgent().then(fetchAll)} disabled={agentStatus?.isRunning} className="px-5 py-2 bg-success text-white rounded-lg text-[11px] font-bold disabled:opacity-50 hover:bg-success/80 transition-all flex items-center gap-2">
+                          <Play size={14} /> Activate Live Logs
+                        </button>
+                        <button onClick={() => SOARService.stopAgent().then(fetchAll)} disabled={!agentStatus?.isRunning} className="px-5 py-2 bg-danger text-white rounded-lg text-[11px] font-bold disabled:opacity-50 hover:bg-danger/80 transition-all flex items-center gap-2">
+                          <StopCircle size={14} /> Stop
+                        </button>
+                      </div>
+                    </div>
+                    <div className="bg-[#0A0A0C] border border-border/40 rounded-xl p-4 h-[250px] overflow-y-auto font-mono text-[11px] space-y-1">
+                      {(!agentStatus?.output || agentStatus.output.length === 0) ? (
+                        <div className="text-text-muted/40 text-center py-10 italic">Agent offline. Terminal ready...</div>
+                      ) : (
+                        agentStatus.output.map((line: string, i: number) => (
+                          <div key={i} className={`flex gap-2 ${line.includes('[ERR]') ? 'text-danger' : line.includes('🔥') || line.includes('💀') ? 'text-warning font-bold' : 'text-success/90'}`}>
+                            <span className="text-text-muted/30 select-none">{String(i+1).padStart(3)}</span> {line}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
                   {/* Filters */}
                   <div className="flex gap-3 items-center">
                     <div className="relative flex-1">

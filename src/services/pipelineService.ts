@@ -46,7 +46,7 @@ export class PipelineService {
       
       // Fallback handlers for various log formats (Standard SIEM, custom attacker sim, risk_dataset format)
       let logType = String(raw.event_type || raw.category || raw.type || "UNKNOWN").toUpperCase();
-      let actionTxt = String(raw.action || raw.pattern || "UNKNOWN").toUpperCase();
+      let actionTxt = String(raw.action || raw.action_taken || raw.pattern || "UNKNOWN").toUpperCase();
       
       const log: NormalizedLog = {
         timestamp: this.validateTimestamp(raw.timestamp || raw.time || raw.ts),
@@ -54,7 +54,7 @@ export class PipelineService {
         user: String(raw.user || raw.username || "anonymous").toLowerCase(),
         source_ip: this.validateIP(raw.source_ip || raw.ip || raw.src_ip || "0.0.0.0"),
         action: actionTxt,
-        status: String(raw.status || raw.risk || "UNKNOWN").toUpperCase()
+        status: String(raw.status || raw.risk || raw.severity || "UNKNOWN").toUpperCase()
       };
 
       // Strict Gate: No null values allowed
@@ -140,18 +140,42 @@ export class PipelineService {
       }
     });
 
-    // 3. High-Risk Signatures (Exploits, Malware, Exfiltration)
+    // 3. High-Risk Signatures & Universal Critical Threats
+    const knownThreatKeywords = ['MALWARE', 'EXPLOIT', 'EXFILTRATION', 'THREAT_DETECTION', 'RANSOMWARE', 'SQLI', 'DOS', 'PHISHING', 'C2', 'INTRUSION', 'BOTNET'];
+    const criticalSeverities = ['CRITICAL', 'HIGH', 'SEVERE', 'QUARANTINED', 'INFECTED', 'MALICIOUS'];
+
     logs.forEach(log => {
-      if (['MALWARE', 'EXPLOIT', 'EXFILTRATION'].includes(log.event_type)) {
+      let isThreat = false;
+      let conf = 0.85;
+
+      // 3A. Match by recognized event type
+      if (knownThreatKeywords.some(k => log.event_type.includes(k))) {
+        isThreat = true;
+        conf = (log.status === 'SUCCESS' || criticalSeverities.includes(log.status)) ? 0.99 : 0.85;
+      }
+      // 3B. Match by generic high severity / risk regardless of event_type
+      else if (criticalSeverities.some(c => log.status.includes(c) || log.action.includes(c))) {
+        isThreat = true;
+        conf = 0.90;
+      }
+      
+      if (isThreat) {
+        let detType = log.event_type.toLowerCase();
+        if (detType === 'threat_detection' || detType === 'unknown') {
+          detType = 'generic_high_risk_anomaly';
+        }
+
         detections.push({
-          type: log.event_type.toLowerCase(),
-          confidence: log.status === 'SUCCESS' ? 0.99 : 0.85,
+          type: detType,
+          confidence: conf,
           evidence: [log],
           entities: [log.source_ip, log.user]
         });
       }
-      // Critical command execution
-      if (['SPAWN_SHELL', 'PRIVILEGE_ESCALATION'].includes(log.action)) {
+
+      // 4. Critical command execution & actions
+      const badCommands = ['SPAWN_SHELL', 'PRIVILEGE_ESCALATION', 'REVERSE_SHELL', 'SYSTEM_COMPROMISE', 'DUMP_CREDENTIALS', 'BYPASS_DEFENSE'];
+      if (badCommands.some(cmd => log.action.includes(cmd))) {
         detections.push({
           type: "system_compromise",
           confidence: 0.99,

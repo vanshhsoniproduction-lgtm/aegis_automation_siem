@@ -61,10 +61,14 @@ def check_soar_kill():
         with urllib.request.urlopen(req, timeout=1) as res:
             actions = json.loads(res.read().decode())
             for action in actions:
+                # Only care about recent blocks
                 if action.get("action") == "BLOCK_IP" or action.get("action") == "ISOLATE_SYSTEM":
-                    print(f"\n💀 [FATAL] SOAR ACTIVE RESPONSE TRIGGERED (Target: {action['target']})! 💀")
-                    print("🛑 Threat Blocked! Exiting Simulator...\n")
-                    sys.exit(0)
+                    target = action.get("target")
+                    if target in IPS:
+                        # Ensure we don't trip on an old pending block randomly
+                        print(f"\n💀 [FATAL] SOAR ACTIVE RESPONSE TRIGGERED (Target: {target})! 💀")
+                        print("🛑 Threat Blocked! Exiting Simulator...\n")
+                        sys.exit(0)
     except SystemExit:
         sys.exit(0)
     except:
